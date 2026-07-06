@@ -1,9 +1,8 @@
-"""MeWe API client — phone-number login + content fetching.
+"""MeWe API client — email/password login + content fetching.
 
 MeWe uses a private REST API.  The auth flow:
-  1. GET  /api/v2/auth/login        → grab CSRF token from cookies
-  2. POST /api/v2/auth/phone        → send phone number, get challenge token
-  3. POST /api/v2/auth/phone/verify → send OTP + challenge token, get session cookie
+  1. GET  homepage                  → grab CSRF token from cookies
+  2. POST /api/v2/auth/login        → send email + password, get session cookie
 
 Post URLs look like:
   https://mewe.com/p/{userId}/{postId}
@@ -46,6 +45,35 @@ class MeWeClient:
         if csrf:
             self.session.headers["x-csrf-token"] = csrf
         return csrf
+
+    def login_with_password(self, email: str, password: str) -> dict:
+        """
+        Log in with email and password.
+        Returns {success: bool, error?: str}.
+        """
+        self._fetch_csrf()
+        payload = {"email": email, "password": password}
+        resp = self.session.post(
+            f"{API_BASE}/auth/login",
+            json=payload,
+            timeout=15,
+        )
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+
+        if resp.status_code == 200:
+            # Refresh CSRF from updated cookies after login
+            csrf = self.session.cookies.get("_csrf", "")
+            if csrf:
+                self.session.headers["x-csrf-token"] = csrf
+            # Confirm the session is actually authenticated
+            if not self.is_authenticated():
+                return {"success": False, "error": "Login appeared to succeed but session check failed."}
+            return {"success": True, "data": data}
+        error_msg = data.get("message") or data.get("error") or f"HTTP {resp.status_code}"
+        return {"success": False, "error": error_msg}
 
     def start_phone_login(self, phone: str) -> dict:
         """

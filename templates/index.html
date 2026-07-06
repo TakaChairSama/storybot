@@ -113,24 +113,16 @@
           <!-- MeWe -->
           <div class="tab-pane fade show active" id="tab-mewe">
             <div id="mewe-status-badge" class="mb-3"></div>
-            <div id="mewe-step-phone">
-              <label class="form-label small">Phone Number</label>
-              <div class="input-group input-group-sm">
-                <input type="tel" class="form-control" id="mewe-phone"
-                       placeholder="+1 555 000 0000" />
-                <button class="btn btn-outline-info" id="btn-mewe-send">
-                  Send SMS
-                </button>
-              </div>
-              <div class="form-text">Include country code, e.g. +1 for US.</div>
-            </div>
-            <div id="mewe-step-otp" class="d-none mt-3">
-              <label class="form-label small">SMS Code</label>
-              <div class="input-group input-group-sm">
-                <input type="text" class="form-control" id="mewe-otp"
-                       placeholder="123456" maxlength="8" />
-                <button class="btn btn-success" id="btn-mewe-verify">Verify</button>
-              </div>
+            <div id="mewe-step-login">
+              <label class="form-label small">Email</label>
+              <input type="email" class="form-control form-control-sm mb-2" id="mewe-email"
+                     placeholder="you@example.com" />
+              <label class="form-label small">Password</label>
+              <input type="password" class="form-control form-control-sm mb-2" id="mewe-password"
+                     placeholder="Your MeWe password" />
+              <button class="btn btn-sm btn-outline-info w-100" id="btn-mewe-login">
+                Log in to MeWe
+              </button>
             </div>
             <div id="mewe-auth-msg" class="mt-2 small"></div>
             <button class="btn btn-sm btn-outline-danger mt-3 d-none"

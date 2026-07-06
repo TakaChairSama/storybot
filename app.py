@@ -302,6 +302,21 @@ def get_world_bible(world_id):
 
 # ── MeWe auth ──────────────────────────────────────────────────────────────────
 
+@app.route("/api/auth/mewe/login", methods=["POST"])
+def mewe_login():
+    body = request.get_json(force=True)
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    if not email or not password:
+        return jsonify({"error": "Email and password are required."}), 400
+    client = _get_mewe_client()
+    result = client.login_with_password(email, password)
+    if result.get("success"):
+        db.set_setting("mewe_cookies", json.dumps(client.get_session_cookies()))
+        return jsonify({"ok": True, "message": "Logged in to MeWe."})
+    return jsonify({"error": result.get("error", "Login failed.")}), 401
+
+
 @app.route("/api/auth/mewe/start", methods=["POST"])
 def mewe_start():
     body = request.get_json(force=True)

@@ -417,49 +417,37 @@ async function refreshMeWeStatus() {
   const { ok, data } = await api("GET", "/auth/mewe/status");
   const badge = document.getElementById("mewe-status-badge");
   const logoutBtn = document.getElementById("btn-mewe-logout");
-  const stepPhone = document.getElementById("mewe-step-phone");
-  const stepOtp = document.getElementById("mewe-step-otp");
+  const stepLogin = document.getElementById("mewe-step-login");
 
   if (ok && data.authenticated) {
     badge.innerHTML = `<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>
       Logged in to MeWe</span>`;
     logoutBtn.classList.remove("d-none");
-    stepPhone.classList.add("d-none");
-    stepOtp.classList.add("d-none");
+    stepLogin.classList.add("d-none");
   } else {
     badge.innerHTML = `<span class="badge bg-secondary">Not logged in</span>`;
     logoutBtn.classList.add("d-none");
-    stepPhone.classList.remove("d-none");
+    stepLogin.classList.remove("d-none");
   }
 }
 
 document.querySelector('[data-bs-target="#authModal"]').addEventListener("click",
   () => { refreshMeWeStatus(); refreshDiscordStatus(); });
 
-document.getElementById("btn-mewe-send").addEventListener("click", async () => {
-  const phone = document.getElementById("mewe-phone").value.trim();
+document.getElementById("btn-mewe-login").addEventListener("click", async () => {
+  const email = document.getElementById("mewe-email").value.trim();
+  const password = document.getElementById("mewe-password").value;
   const msg = document.getElementById("mewe-auth-msg");
-  if (!phone) { msg.innerHTML = `<span class="status-err">Enter a phone number.</span>`; return; }
-
-  msg.innerHTML = `<span class="status-inf">Sending SMS…</span>`;
-  const { ok, data } = await api("POST", "/auth/mewe/start", { phone });
-  if (ok) {
-    msg.innerHTML = `<span class="status-ok">SMS sent! Enter the code below.</span>`;
-    document.getElementById("mewe-step-otp").classList.remove("d-none");
-  } else {
-    msg.innerHTML = `<span class="status-err">${escHtml(data.error)}</span>`;
+  if (!email || !password) {
+    msg.innerHTML = `<span class="status-err">Enter your email and password.</span>`;
+    return;
   }
-});
 
-document.getElementById("btn-mewe-verify").addEventListener("click", async () => {
-  const otp = document.getElementById("mewe-otp").value.trim();
-  const msg = document.getElementById("mewe-auth-msg");
-  if (!otp) { msg.innerHTML = `<span class="status-err">Enter the OTP code.</span>`; return; }
-
-  msg.innerHTML = `<span class="status-inf">Verifying…</span>`;
-  const { ok, data } = await api("POST", "/auth/mewe/verify", { otp });
+  msg.innerHTML = `<span class="status-inf">Logging in…</span>`;
+  const { ok, data } = await api("POST", "/auth/mewe/login", { email, password });
   if (ok) {
     msg.innerHTML = `<span class="status-ok">${escHtml(data.message)}</span>`;
+    document.getElementById("mewe-password").value = "";
     refreshMeWeStatus();
   } else {
     msg.innerHTML = `<span class="status-err">${escHtml(data.error)}</span>`;
