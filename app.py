@@ -235,9 +235,9 @@ def process_link():
                 api_key=openai_key or None,
                 model=ai_model or None,
             )
-        except Exception:
+        except Exception as exc:
             # Non-fatal: store raw content without analysis
-            ai_analysis = {"error": "AI analysis failed. Check your AI backend settings."}
+            ai_analysis = {"error": str(exc) or "AI analysis failed. Check your AI backend settings."}
 
         # Update world bible
         if ai_analysis and "error" not in ai_analysis:

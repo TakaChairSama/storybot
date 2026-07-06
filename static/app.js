@@ -281,6 +281,7 @@ async function openStoryModal(storyId) {
   const body = document.getElementById("story-modal-body");
   const ai = data.ai_analysis || {};
   const hasAi = Object.keys(ai).length && !ai.error && !ai.raw_response;
+  const hasAiError = !!(ai.error || ai.raw_response);
   const hasTxt = data.txt_path;
 
   body.innerHTML = `
@@ -299,6 +300,12 @@ async function openStoryModal(storyId) {
     </div>
 
     ${hasAi ? buildStoryAnalysisHtml(ai) : ""}
+    ${hasAiError ? `
+      <div class="alert alert-warning py-2 small mb-3">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <strong>AI analysis failed:</strong> ${escHtml(ai.error || "Could not parse AI response.")}
+        Check your AI backend settings (Settings → AI Backend).
+      </div>` : ""}
 
     <div class="mt-3">
       <h6 class="text-muted small text-uppercase">Raw Content</h6>
@@ -400,12 +407,14 @@ btnProcess.addEventListener("click", async () => {
     return;
   }
 
+  const aiErr = mode === "ai" && data.ai_analysis && data.ai_analysis.error;
   const modeStr = mode === "text" ? "saved to TXT" : "analyzed with AI";
   setStatus(
-    `<i class="bi bi-check-circle me-1"></i>
-     "<strong>${escHtml(data.title)}</strong>" ${modeStr}.
-     ${data.txt_path ? `<span class="text-muted">File: ${escHtml(data.txt_path)}</span>` : ""}`,
-    "ok"
+    `<i class="bi bi-${aiErr ? "exclamation-triangle" : "check-circle"} me-1"></i>
+     "<strong>${escHtml(data.title)}</strong>" ${mode === "text" ? "saved to TXT" : "saved"}.
+     ${aiErr ? `<span class="text-warning">AI analysis failed: ${escHtml(data.ai_analysis.error)}</span>` : `<span class="text-muted">${modeStr}</span>`}
+     ${data.txt_path ? `<span class="text-muted ms-2">File: ${escHtml(data.txt_path)}</span>` : ""}`,
+    aiErr ? "err" : "ok"
   );
 
   linkInput.value = "";
