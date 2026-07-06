@@ -52,7 +52,7 @@ class MeWeClient:
         Returns {success: bool, error?: str}.
         """
         self._fetch_csrf()
-        payload = {"email": email, "password": password}
+        payload = {"username": email, "password": password}
         resp = self.session.post(
             f"{API_BASE}/auth/login",
             json=payload,
