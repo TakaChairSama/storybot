@@ -8,7 +8,7 @@ A local web application that reads posts from **MeWe** and threads/forums from *
 
 | Feature | Details |
 |---|---|
-| **MeWe** | Log in with your phone number (SMS OTP). Fetches post body + all comments. |
+| **MeWe** | Log in with your email and password. Fetches post body + all comments. |
 | **Discord** | Log in with your user token. Fetches entire threads and forum posts (all messages, paginated). |
 | **AI mode** | Analyses story text to extract characters, themes, plot points, and a story arc. Builds a cumulative *World Bible* across all stories in a world. |
 | **Text-save mode** | Toggle on to skip AI and just save everything to a `.txt` file in `exports/`. |
@@ -62,9 +62,8 @@ All settings are stored in `storybot.db` (SQLite).
 ### MeWe login
 
 1. Click **Credentials → MeWe**.
-2. Enter your phone number (with country code, e.g. `+1 555 000 0000`).
-3. Click **Send SMS** and wait for the code.
-4. Enter the code and click **Verify**.
+2. Enter your MeWe email address and password.
+3. Click **Log in to MeWe**.
 
 Your session cookies are saved in the database so you won't need to log in again.
 
