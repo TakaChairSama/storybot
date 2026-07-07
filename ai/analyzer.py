@@ -88,17 +88,42 @@ def _call_openai(prompt: str, system: str, api_key: str, model: str = "gpt-4o-mi
 
 
 def _parse_json_response(text: str) -> dict:
-    """Extract JSON from a model response (handles markdown code blocks)."""
+    """Extract JSON from a model response (handles markdown code blocks and inline JSON)."""
     text = text.strip()
-    # Strip ```json ... ``` wrapper if present
+
+    # 1. Strip ```json ... ``` or ``` ... ``` wrapper if present
     m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if m:
-        text = m.group(1).strip()
+        candidate = m.group(1).strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Try the full text as-is
     try:
         return json.loads(text)
-    except Exception:
-        # Best-effort: return raw text in a wrapper
-        return {"raw_response": text, "error": "Could not parse JSON from AI response"}
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Find the outermost {...} block in the response (handles prose wrapping JSON)
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break
+
+    # 4. Give up
+    return {"raw_response": text, "error": "Could not parse JSON from AI response"}
 
 
 def analyze_story(
