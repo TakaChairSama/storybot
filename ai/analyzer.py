@@ -97,13 +97,13 @@ def _parse_json_response(text: str) -> dict:
         candidate = m.group(1).strip()
         try:
             return json.loads(candidate)
-        except Exception:
+        except json.JSONDecodeError:
             pass
 
     # 2. Try the full text as-is
     try:
         return json.loads(text)
-    except Exception:
+    except json.JSONDecodeError:
         pass
 
     # 3. Find the outermost {...} block in the response (handles prose wrapping JSON)
@@ -119,7 +119,7 @@ def _parse_json_response(text: str) -> dict:
                     candidate = text[start : i + 1]
                     try:
                         return json.loads(candidate)
-                    except Exception:
+                    except json.JSONDecodeError:
                         break
 
     # 4. Give up
