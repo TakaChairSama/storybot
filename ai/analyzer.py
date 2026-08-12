@@ -51,20 +51,35 @@ Respond ONLY with valid JSON in the same structure as the world bible:
 }"""
 
 
-def _call_ollama(prompt: str, system: str, model: str = "llama3") -> str:
+def _call_ollama(
+    prompt: str,
+    system: str,
+    model: str = "llama3",
+    json_mode: bool = True,
+    num_ctx: Optional[int] = None,
+) -> str:
     try:
         import ollama  # type: ignore
+        kwargs = {}
+        if json_mode:
+            # Ask Ollama to constrain generation to valid JSON. Without this,
+            # smaller/local models frequently wrap the JSON in prose or
+            # markdown (or emit malformed JSON), which _parse_json_response
+            # then fails to recover.
+            kwargs["format"] = "json"
+        if num_ctx:
+            # Ollama defaults to a small context window (2048 tokens)
+            # regardless of what the model actually supports, so a model
+            # with a large window (e.g. Llama 3.3) needs this raised
+            # explicitly to make use of it.
+            kwargs["options"] = {"num_ctx": num_ctx}
         response = ollama.chat(
             model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            # Ask Ollama to constrain generation to valid JSON. Without this,
-            # smaller/local models frequently wrap the JSON in prose or
-            # markdown (or emit malformed JSON), which _parse_json_response
-            # then fails to recover.
-            format="json",
+            **kwargs,
         )
         return response["message"]["content"]
     except ImportError:
@@ -73,17 +88,24 @@ def _call_ollama(prompt: str, system: str, model: str = "llama3") -> str:
         raise RuntimeError(f"Ollama error: {e}")
 
 
-def _call_openai(prompt: str, system: str, api_key: str, model: str = "gpt-4o-mini") -> str:
+def _call_openai(
+    prompt: str,
+    system: str,
+    api_key: str,
+    model: str = "gpt-4o-mini",
+    json_mode: bool = True,
+) -> str:
     try:
         from openai import OpenAI  # type: ignore
         client = OpenAI(api_key=api_key)
+        kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
         response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
+            **kwargs,
         )
         return response.choices[0].message.content
     except ImportError:
@@ -165,18 +187,33 @@ def _normalize_analysis(data: dict) -> dict:
     return data
 
 
-def _call_backend(prompt: str, system: str, backend: str, api_key: Optional[str], model: Optional[str]) -> str:
+def _call_backend(
+    prompt: str,
+    system: str,
+    backend: str,
+    api_key: Optional[str],
+    model: Optional[str],
+    json_mode: bool = True,
+    num_ctx: Optional[int] = None,
+) -> str:
     if backend == "openai":
         if not api_key:
             raise ValueError("OpenAI API key is required for the 'openai' backend.")
-        return _call_openai(prompt, system, api_key, model or "gpt-4o-mini")
-    return _call_ollama(prompt, system, model or "llama3")
+        return _call_openai(prompt, system, api_key, model or "gpt-4o-mini", json_mode=json_mode)
+    return _call_ollama(prompt, system, model or "llama3", json_mode=json_mode, num_ctx=num_ctx)
 
 
-def _call_and_parse(prompt: str, system: str, backend: str, api_key: Optional[str], model: Optional[str]) -> dict:
+def _call_and_parse(
+    prompt: str,
+    system: str,
+    backend: str,
+    api_key: Optional[str],
+    model: Optional[str],
+    num_ctx: Optional[int] = None,
+) -> dict:
     """Call the backend and parse its response as JSON, retrying once with a
     corrective instruction if the first response isn't valid JSON."""
-    result = _call_backend(prompt, system, backend, api_key, model)
+    result = _call_backend(prompt, system, backend, api_key, model, num_ctx=num_ctx)
     parsed = _parse_json_response(result)
 
     if "error" in parsed:
@@ -187,7 +224,7 @@ def _call_and_parse(prompt: str, system: str, backend: str, api_key: Optional[st
             "Respond again with ONLY the raw JSON object described above. "
             "Do not include markdown code fences, explanations, or any text outside the JSON."
         )
-        retry_result = _call_backend(retry_prompt, system, backend, api_key, model)
+        retry_result = _call_backend(retry_prompt, system, backend, api_key, model, num_ctx=num_ctx)
         parsed = _parse_json_response(retry_result)
 
     if "error" not in parsed:
@@ -201,6 +238,7 @@ def analyze_story(
     backend: str = "ollama",
     api_key: Optional[str] = None,
     model: Optional[str] = None,
+    num_ctx: Optional[int] = None,
 ) -> dict:
     """
     Analyze a single story text.
@@ -213,7 +251,7 @@ def analyze_story(
     # 12000 characters keeps the prompt within most models' context windows
     # while covering the substantial majority of a typical post + comments.
 
-    return _call_and_parse(prompt, SYSTEM_PROMPT, backend, api_key, model)
+    return _call_and_parse(prompt, SYSTEM_PROMPT, backend, api_key, model, num_ctx=num_ctx)
 
 
 def update_world_bible(
@@ -223,6 +261,7 @@ def update_world_bible(
     backend: str = "ollama",
     api_key: Optional[str] = None,
     model: Optional[str] = None,
+    num_ctx: Optional[int] = None,
 ) -> dict:
     """
     Merge a new story's analysis into the world bible.
@@ -241,4 +280,61 @@ def update_world_bible(
         "Merge the new information into the world bible."
     )
 
-    return _call_and_parse(prompt, UPDATE_SYSTEM_PROMPT, backend, api_key, model)
+    return _call_and_parse(prompt, UPDATE_SYSTEM_PROMPT, backend, api_key, model, num_ctx=num_ctx)
+
+
+ASK_SYSTEM_PROMPT = """You are a helpful assistant answering questions about a shared fictional universe, \
+for the people building it.
+You are given the world bible (a curated summary), the character roster, and the FULL text of every \
+story written in this world so far.
+Answer the question using only this material. Be specific — cite character names and story titles or \
+events where relevant.
+If the material doesn't contain the answer, say so plainly instead of guessing."""
+
+
+def ask_about_world(
+    question: str,
+    world_bible: dict,
+    characters: list,
+    stories: list,
+    backend: str = "ollama",
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    num_ctx: Optional[int] = None,
+) -> str:
+    """
+    Answer a free-form question about a world, grounded in the world bible,
+    the character roster, and the FULL (untruncated) text of every story —
+    unlike analyze_story/update_world_bible, which only ever see excerpts.
+    Returns the model's plain-text answer (not JSON).
+    """
+    if backend == "none":
+        raise ValueError("AI backend is disabled. Enable it in Settings to ask questions.")
+
+    bible_json = json.dumps(world_bible, indent=2) if world_bible else "(empty — no stories analyzed yet)"
+    chars_json = (
+        json.dumps(
+            [{"name": c.get("name"), "description": c.get("description")} for c in characters],
+            indent=2,
+        )
+        if characters else "(no characters recorded yet)"
+    )
+    stories_text = (
+        "\n\n".join(
+            f"=== STORY: {s.get('title') or 'Untitled'} ({s.get('source_url', '')}) ===\n"
+            f"{s.get('raw_content', '')}"
+            for s in stories
+        )
+        if stories else "(no stories yet)"
+    )
+
+    prompt = (
+        f"WORLD BIBLE:\n{bible_json}\n\n"
+        f"CHARACTERS:\n{chars_json}\n\n"
+        f"FULL STORY TEXTS:\n{stories_text}\n\n"
+        f"QUESTION:\n{question}"
+    )
+
+    return _call_backend(
+        prompt, ASK_SYSTEM_PROMPT, backend, api_key, model, json_mode=False, num_ctx=num_ctx
+    )
