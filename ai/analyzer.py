@@ -131,6 +131,40 @@ def _parse_json_response(text: str) -> dict:
     return {"raw_response": text, "error": "Could not parse JSON from AI response"}
 
 
+def _coerce_str(value) -> str:
+    """Coerce a value that should be a plain string but might come back from
+    the model as an object (e.g. a timeline entry as
+    {"date": ..., "event": ...} instead of a string) into readable text."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("event", "text", "description", "summary", "name", "title"):
+            if isinstance(value.get(key), str):
+                rest = ", ".join(
+                    f"{k}: {v}" for k, v in value.items() if k != key and v
+                )
+                return f"{value[key]} ({rest})" if rest else value[key]
+        return ", ".join(f"{k}: {v}" for k, v in value.items())
+    if isinstance(value, list):
+        return ", ".join(_coerce_str(v) for v in value)
+    return str(value)
+
+
+def _normalize_analysis(data: dict) -> dict:
+    """Ensure list-of-string fields in an AI analysis actually contain
+    strings, since models don't always follow the requested schema exactly."""
+    for field in ("themes", "plot_points", "story_arcs", "timeline"):
+        if isinstance(data.get(field), list):
+            data[field] = [_coerce_str(v) for v in data[field]]
+
+    if isinstance(data.get("characters"), list):
+        for char in data["characters"]:
+            if isinstance(char, dict) and isinstance(char.get("relationships"), list):
+                char["relationships"] = [_coerce_str(v) for v in char["relationships"]]
+
+    return data
+
+
 def _call_backend(prompt: str, system: str, backend: str, api_key: Optional[str], model: Optional[str]) -> str:
     if backend == "openai":
         if not api_key:
@@ -154,7 +188,10 @@ def _call_and_parse(prompt: str, system: str, backend: str, api_key: Optional[st
             "Do not include markdown code fences, explanations, or any text outside the JSON."
         )
         retry_result = _call_backend(retry_prompt, system, backend, api_key, model)
-        return _parse_json_response(retry_result)
+        parsed = _parse_json_response(retry_result)
+
+    if "error" not in parsed:
+        parsed = _normalize_analysis(parsed)
 
     return parsed
 
