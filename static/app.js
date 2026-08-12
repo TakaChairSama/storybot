@@ -172,15 +172,48 @@ function renderWorldContent() {
         </div>
 
         <div>
-          <h6 class="text-warning mb-2">
-            <i class="bi bi-journal-richtext me-1"></i>World Bible
-          </h6>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="text-warning mb-0">
+              <i class="bi bi-journal-richtext me-1"></i>World Bible
+            </h6>
+            <button class="btn btn-sm btn-outline-warning py-0 px-2" id="btn-recompile-bible"
+                    title="Rebuild the world bible from every story on file"
+                    ${stories.length ? "" : "disabled"}>
+              <i class="bi bi-arrow-repeat me-1"></i>Recompile
+            </button>
+          </div>
           <div id="bible-area">
             ${Object.keys(worldBible).length ? "" :
               `<p class="text-muted small fst-italic">
                  No world bible yet — process some stories with AI mode enabled.
                </p>`}
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+      <div class="col-12">
+        <div class="ask-ai-panel">
+          <h6 class="text-warning mb-2">
+            <i class="bi bi-chat-square-text me-1"></i>Ask AI About This World
+          </h6>
+          <p class="text-muted small mb-2">
+            The AI reads the world bible, character roster, and the <strong>full text</strong>
+            of every story in this world (not just excerpts) to answer — this can take a
+            while for worlds with many stories.
+          </p>
+          <div class="d-flex gap-2 flex-wrap">
+            <textarea class="form-control form-control-sm flex-grow-1" id="ask-question" rows="2"
+                      placeholder="e.g. What has changed about Ari's relationship with Kestrel since the second story?"
+                      style="min-width:260px;"
+                      ${stories.length ? "" : "disabled"}></textarea>
+            <button class="btn btn-sm btn-warning align-self-start" id="btn-ask-ai"
+                    ${stories.length ? "" : "disabled"}>
+              <i class="bi bi-send me-1"></i>Ask
+            </button>
+          </div>
+          <div id="ask-answer" class="mt-3"></div>
         </div>
       </div>
     </div>
@@ -211,6 +244,58 @@ function renderWorldContent() {
   if (Object.keys(worldBible).length) {
     bibleArea.appendChild(buildBibleSection(worldBible));
   }
+
+  document.getElementById("btn-recompile-bible")
+    .addEventListener("click", () => recompileBible(activeWorldId));
+  document.getElementById("btn-ask-ai")
+    .addEventListener("click", () => askAi(activeWorldId));
+}
+
+async function recompileBible(worldId) {
+  const btn = document.getElementById("btn-recompile-bible");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Recompiling…`;
+
+  const { ok, data } = await api("POST", `/worlds/${worldId}/bible/recompile`);
+
+  if (worldId !== activeWorldId) return; // user switched worlds while this was running
+
+  if (!ok) {
+    setStatus(`Error recompiling world bible: ${escHtml(data.error || "Unknown error")}`, "err");
+    btn.disabled = false;
+    btn.innerHTML = `<i class="bi bi-arrow-repeat me-1"></i>Recompile`;
+    return;
+  }
+
+  await selectWorld(worldId);
+  setStatus("World bible recompiled from all stories.", "ok");
+}
+
+async function askAi(worldId) {
+  const textarea = document.getElementById("ask-question");
+  const question = textarea.value.trim();
+  if (!question) return;
+
+  const btn = document.getElementById("btn-ask-ai");
+  const answerBox = document.getElementById("ask-answer");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Thinking…`;
+  answerBox.innerHTML =
+    `<p class="text-muted small fst-italic">Reading the world bible, characters, and full story text…</p>`;
+
+  const { ok, data } = await api("POST", `/worlds/${worldId}/ask`, { question });
+
+  if (worldId !== activeWorldId) return; // user switched worlds while this was running
+
+  btn.disabled = false;
+  btn.innerHTML = `<i class="bi bi-send me-1"></i>Ask`;
+
+  if (!ok) {
+    answerBox.innerHTML = `<p class="status-err small mb-0">${escHtml(data.error || "Failed to get an answer.")}</p>`;
+    return;
+  }
+
+  answerBox.innerHTML = `<div class="ask-answer-box">${escHtml(data.answer)}</div>`;
 }
 
 function buildStoryCard(s) {
@@ -510,21 +595,25 @@ document.querySelector('[data-bs-target="#settingsModal"]').addEventListener("cl
   if (!ok) return;
   document.getElementById("ai-backend").value = data.ai_backend || "ollama";
   document.getElementById("ai-model").value = data.ai_model || "";
-  toggleOpenAiKey(data.ai_backend || "ollama");
+  document.getElementById("ollama-num-ctx").value = data.ollama_num_ctx || "";
+  toggleBackendFields(data.ai_backend || "ollama");
 });
 
 document.getElementById("ai-backend").addEventListener("change", e =>
-  toggleOpenAiKey(e.target.value));
+  toggleBackendFields(e.target.value));
 
-function toggleOpenAiKey(backend) {
+function toggleBackendFields(backend) {
   document.getElementById("openai-key-row").style.display =
     backend === "openai" ? "" : "none";
+  document.getElementById("ollama-ctx-row").style.display =
+    backend === "ollama" ? "" : "none";
 }
 
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
   const payload = {
     ai_backend: document.getElementById("ai-backend").value,
     ai_model:   document.getElementById("ai-model").value.trim(),
+    ollama_num_ctx: document.getElementById("ollama-num-ctx").value.trim(),
   };
   const key = document.getElementById("openai-key").value.trim();
   if (key) payload.openai_api_key = key;

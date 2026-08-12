@@ -181,6 +181,16 @@
           <input type="password" class="form-control form-control-sm" id="openai-key"
                  placeholder="sk-…" />
         </div>
+        <div class="mb-3" id="ollama-ctx-row" style="display:none;">
+          <label class="form-label small">Context Window (num_ctx)</label>
+          <input type="number" class="form-control form-control-sm" id="ollama-num-ctx"
+                 placeholder="Ollama default is 2048" min="512" step="512" />
+          <div class="form-text">
+            Ollama caps the context window at 2048 tokens by default no matter what the
+            model supports. Raise this to let bigger-context models (e.g. Llama 3.3) see
+            more of the world bible and story text — especially useful for "Ask AI".
+          </div>
+        </div>
         <div id="settings-msg" class="small"></div>
       </div>
       <div class="modal-footer border-secondary">

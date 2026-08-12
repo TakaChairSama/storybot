@@ -46,6 +46,20 @@ def _get_discord_client() -> DiscordClient:
     return DiscordClient(token)
 
 
+def _ai_settings():
+    """Load the configured AI backend/model/key/context-window from settings."""
+    settings = db.get_all_settings()
+    ai_backend = settings.get("ai_backend", "ollama")
+    ai_model = settings.get("ai_model", "") or None
+    openai_key = settings.get("openai_api_key", "") or None
+    num_ctx_raw = settings.get("ollama_num_ctx", "")
+    try:
+        num_ctx = int(num_ctx_raw) if num_ctx_raw else None
+    except ValueError:
+        num_ctx = None
+    return settings, ai_backend, ai_model, openai_key, num_ctx
+
+
 def _detect_source(url: str) -> str:
     try:
         hostname = urlparse(url.strip()).hostname or ""
@@ -223,17 +237,15 @@ def process_link():
 
     else:
         # AI analysis
-        settings = db.get_all_settings()
-        ai_backend = settings.get("ai_backend", "ollama")
-        ai_model = settings.get("ai_model", "")
-        openai_key = settings.get("openai_api_key", "")
+        settings, ai_backend, ai_model, openai_key, num_ctx = _ai_settings()
 
         try:
             ai_analysis = analyzer.analyze_story(
                 raw_text,
                 backend=ai_backend,
-                api_key=openai_key or None,
-                model=ai_model or None,
+                api_key=openai_key,
+                model=ai_model,
+                num_ctx=num_ctx,
             )
         except Exception as exc:
             # Non-fatal: store raw content without analysis
@@ -247,7 +259,7 @@ def process_link():
                 current_bible = world_bibles.get(str(world_id), {})
                 updated_bible = analyzer.update_world_bible(
                     current_bible, ai_analysis, raw_text,
-                    backend=ai_backend, api_key=openai_key or None, model=ai_model or None,
+                    backend=ai_backend, api_key=openai_key, model=ai_model, num_ctx=num_ctx,
                 )
                 world_bibles[str(world_id)] = updated_bible
                 db.set_setting("world_bible", json.dumps(world_bibles))
@@ -298,6 +310,100 @@ def get_world_bible(world_id):
     except Exception:
         bibles = {}
     return jsonify(bibles.get(str(world_id), {}))
+
+
+@app.route("/api/worlds/<int:world_id>/bible/recompile", methods=["POST"])
+def recompile_world_bible(world_id):
+    """Rebuild the world bible from scratch using every story on file,
+    instead of relying on the incremental merges done at process time."""
+    stories = db.get_stories(world_id)
+    if not stories:
+        return jsonify({"error": "No stories to compile yet."}), 400
+
+    _, ai_backend, ai_model, openai_key, num_ctx = _ai_settings()
+    if ai_backend == "none":
+        return jsonify({
+            "error": "AI backend is disabled. Enable it in Settings to recompile the world bible."
+        }), 400
+
+    stories_sorted = sorted(stories, key=lambda s: s["created_at"])
+
+    bible = {}
+    for s in stories_sorted:
+        analysis = s.get("ai_analysis") or {}
+        if not analysis or "error" in analysis or "raw_response" in analysis:
+            # No usable stored analysis for this story (e.g. it failed
+            # originally) — analyze it fresh from its raw content.
+            try:
+                analysis = analyzer.analyze_story(
+                    s["raw_content"], backend=ai_backend,
+                    api_key=openai_key, model=ai_model, num_ctx=num_ctx,
+                )
+            except Exception:
+                continue
+        if not analysis or "error" in analysis:
+            continue
+
+        try:
+            bible = analyzer.update_world_bible(
+                bible, analysis, s["raw_content"],
+                backend=ai_backend, api_key=openai_key, model=ai_model, num_ctx=num_ctx,
+            )
+        except Exception:
+            continue
+
+        for char in analysis.get("characters", []):
+            if char.get("name"):
+                db.upsert_character(
+                    world_id, char["name"],
+                    description=char.get("description", ""),
+                    story_id=s["id"],
+                )
+
+    existing_bible_json = db.get_setting("world_bible", "{}")
+    world_bibles = json.loads(existing_bible_json) if existing_bible_json else {}
+    world_bibles[str(world_id)] = bible
+    db.set_setting("world_bible", json.dumps(world_bibles))
+
+    return jsonify(bible)
+
+
+# ── Ask AI ─────────────────────────────────────────────────────────────────────
+
+@app.route("/api/worlds/<int:world_id>/ask", methods=["POST"])
+def ask_world(world_id):
+    """Answer a free-form question grounded in the world bible, characters,
+    and the FULL text of every story in the world (no truncation)."""
+    body = request.get_json(force=True)
+    question = (body.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "Question is required."}), 400
+
+    _, ai_backend, ai_model, openai_key, num_ctx = _ai_settings()
+    if ai_backend == "none":
+        return jsonify({
+            "error": "AI backend is disabled. Enable it in Settings to ask questions."
+        }), 400
+
+    raw = db.get_setting("world_bible", "{}")
+    try:
+        bibles = json.loads(raw)
+    except Exception:
+        bibles = {}
+    world_bible = bibles.get(str(world_id), {})
+
+    characters = db.get_characters(world_id)
+    stories = sorted(db.get_stories(world_id), key=lambda s: s["created_at"])
+
+    try:
+        answer = analyzer.ask_about_world(
+            question, world_bible, characters, stories,
+            backend=ai_backend, api_key=openai_key, model=ai_model, num_ctx=num_ctx,
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc) or "AI request failed."}), 500
+
+    return jsonify({"answer": answer})
 
 
 # ── MeWe auth ──────────────────────────────────────────────────────────────────
@@ -407,7 +513,7 @@ def get_settings():
 @app.route("/api/settings", methods=["POST"])
 def save_settings():
     body = request.get_json(force=True)
-    allowed = {"ai_backend", "ai_model", "openai_api_key", "export_dir"}
+    allowed = {"ai_backend", "ai_model", "openai_api_key", "export_dir", "ollama_num_ctx"}
     for key in allowed:
         if key in body:
             db.set_setting(key, str(body[key]))
