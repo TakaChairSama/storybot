@@ -31,8 +31,21 @@ const api = async (method, path, body) => {
   return { ok: res.ok, status: res.status, data };
 };
 
+// AI responses occasionally put an object where a plain string was asked
+// for (e.g. a timeline entry as {"date": ..., "event": ...} instead of a
+// string). Flatten those into readable text instead of letting them coerce
+// to "[object Object]".
+const asText = v => {
+  if (v && typeof v === "object") {
+    return Object.values(v)
+      .filter(x => typeof x === "string" || typeof x === "number")
+      .join(" — ");
+  }
+  return v;
+};
+
 const escHtml = s =>
-  String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  String(asText(s) || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const setStatus = (msg, type = "inf") => {
   processStatus.className = `mt-2 small status-${type}`;
