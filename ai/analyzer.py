@@ -60,6 +60,11 @@ def _call_ollama(prompt: str, system: str, model: str = "llama3") -> str:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
+            # Ask Ollama to constrain generation to valid JSON. Without this,
+            # smaller/local models frequently wrap the JSON in prose or
+            # markdown (or emit malformed JSON), which _parse_json_response
+            # then fails to recover.
+            format="json",
         )
         return response["message"]["content"]
     except ImportError:
@@ -126,6 +131,34 @@ def _parse_json_response(text: str) -> dict:
     return {"raw_response": text, "error": "Could not parse JSON from AI response"}
 
 
+def _call_backend(prompt: str, system: str, backend: str, api_key: Optional[str], model: Optional[str]) -> str:
+    if backend == "openai":
+        if not api_key:
+            raise ValueError("OpenAI API key is required for the 'openai' backend.")
+        return _call_openai(prompt, system, api_key, model or "gpt-4o-mini")
+    return _call_ollama(prompt, system, model or "llama3")
+
+
+def _call_and_parse(prompt: str, system: str, backend: str, api_key: Optional[str], model: Optional[str]) -> dict:
+    """Call the backend and parse its response as JSON, retrying once with a
+    corrective instruction if the first response isn't valid JSON."""
+    result = _call_backend(prompt, system, backend, api_key, model)
+    parsed = _parse_json_response(result)
+
+    if "error" in parsed:
+        retry_prompt = (
+            f"{prompt}\n\n"
+            "Your previous response could not be parsed as JSON:\n"
+            f"{result[:2000]}\n\n"
+            "Respond again with ONLY the raw JSON object described above. "
+            "Do not include markdown code fences, explanations, or any text outside the JSON."
+        )
+        retry_result = _call_backend(retry_prompt, system, backend, api_key, model)
+        return _parse_json_response(retry_result)
+
+    return parsed
+
+
 def analyze_story(
     raw_text: str,
     backend: str = "ollama",
@@ -143,14 +176,7 @@ def analyze_story(
     # 12000 characters keeps the prompt within most models' context windows
     # while covering the substantial majority of a typical post + comments.
 
-    if backend == "openai":
-        if not api_key:
-            raise ValueError("OpenAI API key is required for the 'openai' backend.")
-        result = _call_openai(prompt, SYSTEM_PROMPT, api_key, model or "gpt-4o-mini")
-    else:
-        result = _call_ollama(prompt, SYSTEM_PROMPT, model or "llama3")
-
-    return _parse_json_response(result)
+    return _call_and_parse(prompt, SYSTEM_PROMPT, backend, api_key, model)
 
 
 def update_world_bible(
@@ -178,11 +204,4 @@ def update_world_bible(
         "Merge the new information into the world bible."
     )
 
-    if backend == "openai":
-        if not api_key:
-            raise ValueError("OpenAI API key is required for the 'openai' backend.")
-        result = _call_openai(prompt, UPDATE_SYSTEM_PROMPT, api_key, model or "gpt-4o-mini")
-    else:
-        result = _call_ollama(prompt, UPDATE_SYSTEM_PROMPT, model or "llama3")
-
-    return _parse_json_response(result)
+    return _call_and_parse(prompt, UPDATE_SYSTEM_PROMPT, backend, api_key, model)
